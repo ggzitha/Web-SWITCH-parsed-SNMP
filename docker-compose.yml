@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  tp-link-snmp-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tplink-snmp-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Host networking is recommended for SNMP agents so all dynamic UDP ports
+    # are directly accessible to Zabbix without manual port forwarding:
+    # network_mode: "host"
+    #
+    # Alternatively, map specific UDP/TCP ports as below:
+    ports:
+      - "8080:8080/tcp"          # Web Dashboard
+      - "161-180:161-180/udp"    # Dynamic SNMP Ports for 12+ Switches (161=Switch 1 ... 172=Switch 12)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

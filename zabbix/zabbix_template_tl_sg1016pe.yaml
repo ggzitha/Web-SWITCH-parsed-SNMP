@@ -1,0 +1,310 @@
+zabbix_export:
+  version: '6.4'
+  template_groups:
+    - uuid: 9692ea4e1505438c806b94dcebe35351
+      name: 'Templates/Network devices'
+  templates:
+    - uuid: b7f84b02264242989f656f6930d0c8d8
+      template: 'TP-Link TL-SG1016PE by SNMP'
+      name: 'TP-Link TL-SG1016PE Easy Smart Switch by SNMP'
+      description: |
+        Zabbix Template for TP-Link Easy Smart Switches (TL-SG1016PE, TL-SG108PE, etc.)
+        Monitors Port Statistics (Good/Bad Packets, Link Speed) and PoE Config (Power, Current, Voltage, Status)
+        via Python Web-to-SNMP Gateway.
+      groups:
+        - name: 'Templates/Network devices'
+      items:
+        - uuid: 85d4975a3449453b88f13879245972d6
+          name: 'System Description'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.2.1.1.1.0
+          key: sysDescr
+          delay: 1h
+          history: 7d
+          trends: '0'
+          value_type: CHAR
+          description: 'Software and hardware description of the switch'
+          tags:
+            - tag: scope
+              value: notice
+
+        - uuid: 95517efb5ba6459fb4a97885d7dddb37
+          name: 'Real Switch IP / System Name'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.2.1.1.5.0
+          key: sysName
+          delay: 10m
+          history: 7d
+          trends: '0'
+          value_type: CHAR
+          description: 'The real switch IP address returned by the gateway'
+          tags:
+            - tag: scope
+              value: notice
+
+        - uuid: df46ce35ef8e45bf9a952378140e5bc1
+          name: 'System Uptime'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.2.1.1.3.0
+          key: sysUpTime
+          delay: 1m
+          history: 7d
+          value_type: UNSIGNED
+          units: uptime
+          preprocessing:
+            - type: MULTIPLIER
+              parameters:
+                - '0.01'
+          tags:
+            - tag: scope
+              value: notice
+
+        - uuid: e1b5efd328a0452280d02cbc13f9ecd0
+          name: 'PoE: Total Power Consumption'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.11863.6.1.6.0
+          key: tplink.poe.power.total_consumption
+          delay: 10s
+          history: 7d
+          value_type: FLOAT
+          units: W
+          preprocessing:
+            - type: MULTIPLIER
+              parameters:
+                - '0.1'
+          tags:
+            - tag: scope
+              value: performance
+
+        - uuid: 23fb07e5aec743528faf909332eb0ad7
+          name: 'PoE: Total Power Budget Limit'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.11863.6.1.5.0
+          key: tplink.poe.power.total_limit
+          delay: 1h
+          history: 7d
+          value_type: FLOAT
+          units: W
+          preprocessing:
+            - type: MULTIPLIER
+              parameters:
+                - '0.1'
+          tags:
+            - tag: scope
+              value: capacity
+
+        - uuid: 32ee847fc2e44624977ff97202145d29
+          name: 'PoE: Total Power Remaining'
+          type: SNMP_AGENT
+          snmp_oid: 1.3.6.1.4.1.11863.6.1.7.0
+          key: tplink.poe.power.total_remain
+          delay: 10s
+          history: 7d
+          value_type: FLOAT
+          units: W
+          preprocessing:
+            - type: MULTIPLIER
+              parameters:
+                - '0.1'
+          tags:
+            - tag: scope
+              value: capacity
+
+      discovery_rules:
+        # Discovery Rule 1: Network Interfaces
+        - uuid: e81fc33f951c4574b653641e991767f0
+          name: 'Network Interfaces Discovery'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#IFNAME},1.3.6.1.2.1.31.1.1.1.1,{#IFDESCR},1.3.6.1.2.1.2.2.1.2]'
+          key: net.if.discovery
+          delay: 1h
+          item_prototypes:
+            - uuid: f1c39f32c1f04c18932cc34831406e4c
+              name: 'Interface {#IFDESCR}: Operational Status'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.2.2.1.8.{#SNMPINDEX}'
+              key: 'net.if.status[ifOperStatus.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              valuemap:
+                name: 'IF-MIB::ifOperStatus'
+              tags:
+                - tag: interface
+                  value: '{#IFDESCR}'
+
+            - uuid: 19be6d627b244431a37c0af66b2e4a92
+              name: 'Interface {#IFDESCR}: Speed'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.15.{#SNMPINDEX}'
+              key: 'net.if.speed[ifHighSpeed.{#SNMPINDEX}]'
+              delay: 1m
+              history: 7d
+              units: Mbps
+              tags:
+                - tag: interface
+                  value: '{#IFDESCR}'
+
+            - uuid: 7992d96ced334210b1423382a8b97666
+              name: 'Interface {#IFDESCR}: Inbound Packets'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.7.{#SNMPINDEX}'
+              key: 'net.if.in.pkts[ifHCInUcastPkts.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              value_type: UNSIGNED
+              preprocessing:
+                - type: CHANGE_PER_SECOND
+              tags:
+                - tag: interface
+                  value: '{#IFDESCR}'
+
+            - uuid: 0a84edd8ba084171984a8e2ba1147e15
+              name: 'Interface {#IFDESCR}: Outbound Packets'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.11.{#SNMPINDEX}'
+              key: 'net.if.out.pkts[ifHCOutUcastPkts.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              value_type: UNSIGNED
+              preprocessing:
+                - type: CHANGE_PER_SECOND
+              tags:
+                - tag: interface
+                  value: '{#IFDESCR}'
+
+            - uuid: 43f0f5bdb7064f408234a579743c0e2c
+              name: 'Interface {#IFDESCR}: Inbound Packet Errors'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.2.2.1.14.{#SNMPINDEX}'
+              key: 'net.if.in.errors[ifInErrors.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              value_type: UNSIGNED
+              preprocessing:
+                - type: CHANGE_PER_SECOND
+              tags:
+                - tag: interface
+                  value: '{#IFDESCR}'
+
+            - uuid: 248572bc0f294a71823b8fb128e3356c
+              name: 'Interface {#IFDESCR}: Outbound Packet Errors'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.2.2.1.20.{#SNMPINDEX}'
+              key: 'net.if.out.errors[ifOutErrors.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              value_type: UNSIGNED
+              preprocessing:
+                - type: CHANGE_PER_SECOND
+              tags:
+                - tag: interface
+                  value: '{#IFDESCR}'
+
+          trigger_prototypes:
+            - uuid: b47890a006c645a28e4cc371148d3576
+              expression: 'change(/TP-Link TL-SG1016PE by SNMP/net.if.in.errors[ifInErrors.{#SNMPINDEX}])>0'
+              name: 'Interface {#IFDESCR}: Inbound packet errors detected'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: performance
+
+        # Discovery Rule 2: PoE Ports
+        - uuid: 086fb5b1f6dd4194af76fd7dfaa9604b
+          name: 'PoE Ports Discovery'
+          type: SNMP_AGENT
+          snmp_oid: 'discovery[{#POEPORT},1.3.6.1.4.1.11863.6.3.1.1]'
+          key: poe.port.discovery
+          delay: 1h
+          item_prototypes:
+            - uuid: 2569dceb126743bbbecbc8b8b2211fef
+              name: 'Port {#POEPORT}: PoE Power Status'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.4.1.11863.6.3.1.11.{#SNMPINDEX}'
+              key: 'poe.status[powerStatus.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              trends: '0'
+              value_type: CHAR
+              tags:
+                - tag: poe_port
+                  value: '{#POEPORT}'
+
+            - uuid: ac69b44c9e724ce986fb358746a2a7a3
+              name: 'Port {#POEPORT}: Power'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.4.1.11863.6.3.1.5.{#SNMPINDEX}'
+              key: 'poe.power[power.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              value_type: FLOAT
+              units: W
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.1'
+              tags:
+                - tag: poe_port
+                  value: '{#POEPORT}'
+
+            - uuid: c0621f113e5341ecae922c48eadefb9a
+              name: 'Port {#POEPORT}: Current'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.4.1.11863.6.3.1.7.{#SNMPINDEX}'
+              key: 'poe.current[current.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              value_type: FLOAT
+              units: mA
+              tags:
+                - tag: poe_port
+                  value: '{#POEPORT}'
+
+            - uuid: b91f844caa2b4f0d8b7cb0e5b40dc9b8
+              name: 'Port {#POEPORT}: Voltage'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.4.1.11863.6.3.1.8.{#SNMPINDEX}'
+              key: 'poe.voltage[voltage.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              value_type: FLOAT
+              units: V
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.1'
+              tags:
+                - tag: poe_port
+                  value: '{#POEPORT}'
+
+            - uuid: 1777fa26e2d24ea583e9ced851f4a581
+              name: 'Port {#POEPORT}: PD Classification'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.4.1.11863.6.3.1.10.{#SNMPINDEX}'
+              key: 'poe.pd_class[pdClass.{#SNMPINDEX}]'
+              delay: 1h
+              history: 7d
+              trends: '0'
+              value_type: CHAR
+              tags:
+                - tag: poe_port
+                  value: '{#POEPORT}'
+
+      valuemaps:
+        - uuid: e7ee1d3d297f4410a9f008f679e647a7
+          name: 'IF-MIB::ifOperStatus'
+          mappings:
+            - value: '1'
+              newvalue: up
+            - value: '2'
+              newvalue: down
+            - value: '3'
+              newvalue: testing
+            - value: '4'
+              newvalue: unknown
+            - value: '5'
+              newvalue: dormant
+            - value: '6'
+              newvalue: notPresent
+            - value: '7'
+              newvalue: lowerLayerDown
