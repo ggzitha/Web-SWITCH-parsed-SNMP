@@ -28,7 +28,7 @@ COPY . .
 
 # Expose Web Dashboard Port and SNMP UDP Ports (161 through 180 for 12+ switches)
 EXPOSE 8080/tcp
-EXPOSE 161-180/udp
+EXPOSE 6161-6180/udp
 
 # Healthcheck against web dashboard API
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
