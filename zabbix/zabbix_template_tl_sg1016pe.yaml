@@ -139,7 +139,47 @@ zabbix_export:
               key: 'net.if.speed[ifHighSpeed.{#SNMPINDEX}]'
               delay: 1m
               history: 7d
-              units: Mbps
+              units: bps
+              preprocessing:
+                - type: MULTIPLIER
+                  parameters:
+                    - '1000000'
+              tags:
+                - tag: interface
+                  value: '{#IFDESCR}'
+
+            - uuid: a64fd4b195f4413fb83b13b535d8fc07
+              name: 'Interface {#IFDESCR}: Bits Received'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.6.{#SNMPINDEX}'
+              key: 'net.if.in[ifHCInOctets.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              units: bps
+              value_type: UNSIGNED
+              preprocessing:
+                - type: CHANGE_PER_SECOND
+                - type: MULTIPLIER
+                  parameters:
+                    - '8'
+              tags:
+                - tag: interface
+                  value: '{#IFDESCR}'
+
+            - uuid: 8097e5d05a124a03979aacbe65a438c3
+              name: 'Interface {#IFDESCR}: Bits Sent'
+              type: SNMP_AGENT
+              snmp_oid: '1.3.6.1.2.1.31.1.1.1.10.{#SNMPINDEX}'
+              key: 'net.if.out[ifHCOutOctets.{#SNMPINDEX}]'
+              delay: 10s
+              history: 7d
+              units: bps
+              value_type: UNSIGNED
+              preprocessing:
+                - type: CHANGE_PER_SECOND
+                - type: MULTIPLIER
+                  parameters:
+                    - '8'
               tags:
                 - tag: interface
                   value: '{#IFDESCR}'
@@ -151,6 +191,7 @@ zabbix_export:
               key: 'net.if.in.pkts[ifHCInUcastPkts.{#SNMPINDEX}]'
               delay: 10s
               history: 7d
+              units: pps
               value_type: UNSIGNED
               preprocessing:
                 - type: CHANGE_PER_SECOND
@@ -165,6 +206,7 @@ zabbix_export:
               key: 'net.if.out.pkts[ifHCOutUcastPkts.{#SNMPINDEX}]'
               delay: 10s
               history: 7d
+              units: pps
               value_type: UNSIGNED
               preprocessing:
                 - type: CHANGE_PER_SECOND
@@ -179,6 +221,7 @@ zabbix_export:
               key: 'net.if.in.errors[ifInErrors.{#SNMPINDEX}]'
               delay: 10s
               history: 7d
+              units: '!errors/s'
               value_type: UNSIGNED
               preprocessing:
                 - type: CHANGE_PER_SECOND
@@ -193,6 +236,7 @@ zabbix_export:
               key: 'net.if.out.errors[ifOutErrors.{#SNMPINDEX}]'
               delay: 10s
               history: 7d
+              units: '!errors/s'
               value_type: UNSIGNED
               preprocessing:
                 - type: CHANGE_PER_SECOND
@@ -208,6 +252,20 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: performance
+
+          graph_prototypes:
+            - uuid: 603e40358206446c89d2fd133cf315ac
+              name: 'Interface {#IFDESCR}: Network Traffic'
+              graph_items:
+                - color: 199C0D
+                  item:
+                    host: 'TP-Link TL-SG1016PE by SNMP'
+                    key: 'net.if.in[ifHCInOctets.{#SNMPINDEX}]'
+                - sortorder: '1'
+                  color: F63100
+                  item:
+                    host: 'TP-Link TL-SG1016PE by SNMP'
+                    key: 'net.if.out[ifHCOutOctets.{#SNMPINDEX}]'
 
         # Discovery Rule 2: PoE Ports
         - uuid: 086fb5b1f6dd4194af76fd7dfaa9604b
