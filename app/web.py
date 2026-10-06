@@ -135,6 +135,15 @@ def create_web_app(
         snap = snapshots.get(switch_id)
         if not snap:
             return jsonify({"error": "Switch not found"}), 404
+        if snap.status != "ONLINE":
+            return jsonify({
+                "switch_id": switch_id,
+                "ip": snap.ip,
+                "status": snap.status,
+                "error": snap.error_message or "Switch is offline",
+                "count": 0,
+                "oids": []
+            })
 
         oid_map = mib_helper.build_oid_map(snap)
         oids_formatted = []

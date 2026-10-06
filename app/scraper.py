@@ -124,7 +124,7 @@ class TpLinkSwitchScraper:
         if self._session is None or self._session.closed:
             # TP-Link Easy Smart switches expect cookie support on IP addresses
             cookie_jar = aiohttp.CookieJar(unsafe=True)
-            timeout = aiohttp.ClientTimeout(total=8.0)
+            timeout = aiohttp.ClientTimeout(total=6.0, connect=3.0)
             self._session = aiohttp.ClientSession(
                 cookie_jar=cookie_jar,
                 timeout=timeout

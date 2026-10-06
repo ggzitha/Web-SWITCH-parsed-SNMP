@@ -11,6 +11,7 @@ import pysnmp.hlapi.asyncio as hlapi
 
 from app.config import SwitchTarget, SnmpConfig
 from app.simulator import MockSwitchState
+from app.scraper import SwitchSnapshot
 from app.snmp_server import SwitchSnmpAgent
 
 
@@ -109,5 +110,54 @@ async def test_snmp_agent_v2c_and_v3():
 
         client_engine.transport_dispatcher.close_dispatcher()
         client_engine_v3.transport_dispatcher.close_dispatcher()
+    finally:
+        agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_offline_switch_snmp_timeout():
+    """Verify that when a switch is OFFLINE, the SNMP agent drops packets resulting in a client timeout."""
+    test_port = 19169
+    target = SwitchTarget(
+        id=99,
+        ip="192.168.88.99",
+        user="admin",
+        password="password",
+        snmp_port=test_port,
+        name="Offline-Switch"
+    )
+    snmp_conf = SnmpConfig(version="both", community="public")
+
+    offline_snap = SwitchSnapshot(
+        switch_id=99,
+        ip="192.168.88.99",
+        name="Offline-Switch",
+        status="OFFLINE",
+        error_message="Host unreachable"
+    )
+
+    agent = SwitchSnmpAgent(
+        bind_host="127.0.0.1",
+        target=target,
+        snmp_config=snmp_conf,
+        get_snapshot=lambda: offline_snap,
+        start_time=time.time()
+    )
+    agent.start()
+
+    try:
+        client_engine = engine.SnmpEngine()
+        transport = await hlapi.UdpTransportTarget.create(("127.0.0.1", test_port), timeout=1.0, retries=0)
+        g = await hlapi.get_cmd(
+            client_engine,
+            hlapi.CommunityData("public"),
+            transport,
+            hlapi.ContextData(),
+            hlapi.ObjectType(hlapi.ObjectIdentity("1.3.6.1.2.1.1.1.0"))
+        )
+        errInd, errStat, errIdx, varBinds = g
+        assert errInd is not None, f"Expected timeout error for offline switch, but got response: {varBinds}"
+        assert "timeout" in str(errInd).lower()
+        client_engine.transport_dispatcher.close_dispatcher()
     finally:
         agent.stop()

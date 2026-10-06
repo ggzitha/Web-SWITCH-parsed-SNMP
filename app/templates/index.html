@@ -588,16 +588,18 @@
       const pct = Math.min(100, Math.max(0, (gPoe.consumption / (gPoe.limit || 1)) * 100));
       document.getElementById('poe-bar-fill').style.width = `${pct}%`;
 
-      // Check if device is offline
-      if (sw.status === 'OFFLINE') {
-        document.getElementById('sw-status').innerHTML = `<span class="badge badge-danger">OFFLINE</span> <span style="font-size: 0.75rem; color: var(--danger); margin-left: 6px;">${escapeHtml(sw.error_message || 'Unreachable')}</span>`;
+      // Check if device is offline or not yet online
+      if (sw.status !== 'ONLINE') {
+        const isOff = sw.status === 'OFFLINE';
+        const badgeClass = isOff ? 'badge-danger' : 'badge-warning';
+        document.getElementById('sw-status').innerHTML = `<span class="badge ${badgeClass}">${escapeHtml(sw.status)}</span> <span style="font-size: 0.75rem; color: var(--danger); margin-left: 6px;">${escapeHtml(sw.error_message || '')}</span>`;
         document.getElementById('poe-text').textContent = 'Offline';
         document.getElementById('poe-remain-text').textContent = '';
         document.getElementById('poe-bar-fill').style.width = '0%';
         document.getElementById('port-count-badge').textContent = `0 Ports`;
         document.getElementById('poe-count-badge').textContent = `0 PoE Ports`;
-        portsTbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 2.5rem; font-weight: 500;">⚠️ Switch is currently OFFLINE — No live port data available.</td></tr>';
-        poeTbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 2.5rem; font-weight: 500;">⚠️ Switch is currently OFFLINE — No live PoE data available.</td></tr>';
+        portsTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 2.5rem; font-weight: 500;">⚠️ Switch is currently ${escapeHtml(sw.status)} — No live port data available.</td></tr>`;
+        poeTbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 2.5rem; font-weight: 500;">⚠️ Switch is currently ${escapeHtml(sw.status)} — No live PoE data available.</td></tr>`;
         return;
       }
 

@@ -33,7 +33,7 @@ class SwitchMibBuilder:
         """Convert snapshot into a sorted map of (tuple_oid) -> rfc1902 ASN.1 value."""
         oids: Dict[Tuple[int, ...], Any] = {}
         now = time.time()
-        uptime_hundredths = int((now - self.start_time) * 100)
+        uptime_hundredths = int((now - self.start_time) * 100) % (2**32)
 
         # ------------------------------------------------------------------
         # 1. SNMPv2-MIB / RFC 1213 System Group (1.3.6.1.2.1.1)

@@ -43,6 +43,8 @@ PRIV_PROTOCOLS = {
 }
 
 
+from pysnmp.smi.error import PySnmpError
+
 class DynamicSwitchMibInstrum(instrum.MibInstrumController):
     """Dynamic MIB Instrumentation Controller that reads fresh data on every SNMP request."""
 
@@ -58,8 +60,11 @@ class DynamicSwitchMibInstrum(instrum.MibInstrumController):
     def read_variables(self, *varBinds, **context):
         """Handle SNMP GET requests."""
         snapshot = self.get_snapshot()
-        if snapshot.status == "OFFLINE":
-            return [(name, exval.noSuchInstance) for name, _ in varBinds]
+        if snapshot.status != "ONLINE":
+            # Device is offline / powered off / unreachable.
+            # Raising PySnmpError causes PySNMP to silently drop the packet,
+            # producing a standard network timeout so Zabbix / snmpwalk marks host DOWN.
+            raise PySnmpError(f"Switch {snapshot.name} ({snapshot.ip}) is {snapshot.status}")
         oids = self._get_current_oids()
         res = []
         for name, _ in varBinds:
@@ -71,8 +76,9 @@ class DynamicSwitchMibInstrum(instrum.MibInstrumController):
     def read_next_variables(self, *varBinds, **context):
         """Handle SNMP GETNEXT and GETBULK requests."""
         snapshot = self.get_snapshot()
-        if snapshot.status == "OFFLINE":
-            return [(name, exval.endOfMibView) for name, _ in varBinds]
+        if snapshot.status != "ONLINE":
+            # Device is offline / powered off / unreachable.
+            raise PySnmpError(f"Switch {snapshot.name} ({snapshot.ip}) is {snapshot.status}")
         oids = self._get_current_oids()
         sorted_keys = sorted(oids.keys())
         res = []
