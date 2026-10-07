@@ -52,10 +52,19 @@ class DynamicSwitchMibInstrum(instrum.MibInstrumController):
         super().__init__(mib_builder)
         self.get_snapshot = get_snapshot
         self.mib_builder_helper = SwitchMibBuilder(start_time)
+        self._cached_oids: Optional[Dict[Tuple[int, ...], Any]] = None
+        self._cache_time: float = 0.0
 
     def _get_current_oids(self) -> Dict[Tuple[int, ...], Any]:
+        now = time.time()
+        # Cache OIDs for 1 second to eliminate object churning during multi-OID GETs or walks
+        if self._cached_oids is not None and (now - self._cache_time) < 1.0:
+            return self._cached_oids
+
         snapshot = self.get_snapshot()
-        return self.mib_builder_helper.build_oid_map(snapshot)
+        self._cached_oids = self.mib_builder_helper.build_oid_map(snapshot)
+        self._cache_time = now
+        return self._cached_oids
 
     def read_variables(self, *varBinds, **context):
         """Handle SNMP GET requests."""

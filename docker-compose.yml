@@ -19,6 +19,8 @@ services:
     ports:
       - "6262:8080/tcp"          # Web Dashboard
       - "6161-6180:6161-6180/udp"    # Dynamic SNMP Ports for 12+ Switches (161=Switch 1 ... 172=Switch 12)
+    volumes:
+      - ./data:/app/data
     logging:
       driver: "json-file"
       options:

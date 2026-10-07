@@ -1,13 +1,18 @@
 """
 SNMP MIB Tree builder for TP-Link Easy Smart Switches.
-Provides standard MIBs (MIB-II, IF-MIB, POWER-ETHERNET-MIB RFC 3621)
+Provides standard MIBs (MIB-II RFC 1213, IF-MIB RFC 2863, POWER-ETHERNET-MIB RFC 3621)
 and Enterprise custom OIDs (1.3.6.1.4.1.11863.6) for full Zabbix compatibility.
+
+Features monotonic rate progression for traffic counters so that polling frequencies
+(e.g., Zabbix 10s or 60s) always receive smooth, accurate throughput without artificial
+zero-drops or spikes.
 """
 
 import datetime
+from dataclasses import dataclass
 import re
 import time
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple, Any, Optional
 
 from pysnmp.proto import rfc1902
 from .scraper import SwitchSnapshot
@@ -23,11 +28,98 @@ def oid_to_str(oid_tuple: Tuple[int, ...]) -> str:
     return ".".join(str(x) for x in oid_tuple)
 
 
+@dataclass
+class PortRateTracker:
+    """Tracks historical packet samples to calculate smooth continuous transfer rates."""
+    prev_rx_pkts: int = 0
+    prev_tx_pkts: int = 0
+    prev_timestamp: float = 0.0
+    curr_rx_pkts: int = 0
+    curr_tx_pkts: int = 0
+    curr_timestamp: float = 0.0
+    rx_pkt_rate: float = 0.0
+    tx_pkt_rate: float = 0.0
+    last_served_rx: int = 0
+    last_served_tx: int = 0
+
+
 class SwitchMibBuilder:
     """Builds a complete, queryable dictionary of SNMP OIDs from a SwitchSnapshot."""
 
-    def __init__(self, start_time: float):
-        self.start_time = start_time
+    def __init__(self, start_time: float = 0.0):
+        self.start_time = start_time if start_time > 0 else time.time()
+        self.port_trackers: Dict[int, PortRateTracker] = {}
+
+    def _update_rates_and_interpolate(
+        self,
+        port_num: int,
+        rx_pkts_raw: int,
+        tx_pkts_raw: int,
+        scraped_at: float,
+        link_up: bool
+    ) -> Tuple[int, int]:
+        """
+        Monotonically interpolate packet counters between scrapes so Zabbix rate calculations
+        (CHANGE_PER_SECOND) remain accurate, continuous, and never drop to 0 bps.
+        """
+        if port_num not in self.port_trackers:
+            self.port_trackers[port_num] = PortRateTracker(
+                curr_rx_pkts=rx_pkts_raw,
+                curr_tx_pkts=tx_pkts_raw,
+                curr_timestamp=scraped_at,
+                last_served_rx=rx_pkts_raw,
+                last_served_tx=tx_pkts_raw
+            )
+
+        tracker = self.port_trackers[port_num]
+        now = time.time()
+
+        # Check if a new scrape sample has arrived
+        if scraped_at > 0 and scraped_at > tracker.curr_timestamp:
+            dt = scraped_at - tracker.curr_timestamp
+            if dt > 0:
+                tracker.prev_rx_pkts = tracker.curr_rx_pkts
+                tracker.prev_tx_pkts = tracker.curr_tx_pkts
+                tracker.prev_timestamp = tracker.curr_timestamp
+
+                # Compute rate if counters did not reset
+                if rx_pkts_raw >= tracker.curr_rx_pkts:
+                    tracker.rx_pkt_rate = (rx_pkts_raw - tracker.curr_rx_pkts) / dt
+                else:
+                    tracker.rx_pkt_rate = 0.0
+
+                if tx_pkts_raw >= tracker.curr_tx_pkts:
+                    tracker.tx_pkt_rate = (tx_pkts_raw - tracker.curr_tx_pkts) / dt
+                else:
+                    tracker.tx_pkt_rate = 0.0
+
+            tracker.curr_rx_pkts = rx_pkts_raw
+            tracker.curr_tx_pkts = tx_pkts_raw
+            tracker.curr_timestamp = scraped_at
+
+        # Extrapolate smoothly between scrape samples (up to 180s max to prevent runaway drift)
+        elapsed = now - tracker.curr_timestamp
+        if link_up and 0 < elapsed <= 180:
+            interp_rx = tracker.curr_rx_pkts + int(tracker.rx_pkt_rate * elapsed)
+            interp_tx = tracker.curr_tx_pkts + int(tracker.tx_pkt_rate * elapsed)
+        else:
+            interp_rx = tracker.curr_rx_pkts
+            interp_tx = tracker.curr_tx_pkts
+
+        # Monotonicity guarantee: counters MUST NEVER decrement in SNMP
+        served_rx = max(tracker.last_served_rx, interp_rx)
+        served_tx = max(tracker.last_served_tx, interp_tx)
+
+        # Handle hardware reboot / counter reset
+        if rx_pkts_raw < tracker.last_served_rx and tracker.curr_timestamp == scraped_at and (tracker.last_served_rx - rx_pkts_raw) > 10000:
+            served_rx = rx_pkts_raw
+        if tx_pkts_raw < tracker.last_served_tx and tracker.curr_timestamp == scraped_at and (tracker.last_served_tx - tx_pkts_raw) > 10000:
+            served_tx = tx_pkts_raw
+
+        tracker.last_served_rx = served_rx
+        tracker.last_served_tx = served_tx
+
+        return served_rx, served_tx
 
     def build_oid_map(self, snapshot: SwitchSnapshot) -> Dict[Tuple[int, ...], Any]:
         """Convert snapshot into a sorted map of (tuple_oid) -> rfc1902 ASN.1 value."""
@@ -46,10 +138,10 @@ class SwitchMibBuilder:
         # sysName returns the REAL switch IP as requested by the user!
         oids[str_to_oid("1.3.6.1.2.1.1.5.0")] = rfc1902.OctetString(snapshot.ip)
         oids[str_to_oid("1.3.6.1.2.1.1.6.0")] = rfc1902.OctetString(snapshot.name or "Rack 1")
-        oids[str_to_oid("1.3.6.1.2.1.1.7.0")] = rfc1902.Integer32(2)  # datalink layer
+        oids[str_to_oid("1.3.6.1.2.1.1.7.0")] = rfc1902.Integer32(2)  # datalink layer (L2 switch)
 
         # ------------------------------------------------------------------
-        # 2. IF-MIB (1.3.6.1.2.1.2 and 1.3.6.1.2.1.31)
+        # 2. IF-MIB (RFC 2863: 1.3.6.1.2.1.2 and 1.3.6.1.2.1.31)
         # ------------------------------------------------------------------
         ports = snapshot.port_stats
         total_ports = len(ports) if ports else 16
@@ -71,14 +163,24 @@ class SwitchMibBuilder:
 
             admin_status = 1 if p.status == "Enabled" else 2
             oper_status = 1 if p.link_status != "Link Down" else 2
+            link_is_up = oper_status == 1
 
-            # Estimate octets based on packets (average 512 bytes per packet)
-            rx_octets = (p.rx_good_pkt * 512) % (2**32)
-            tx_octets = (p.tx_good_pkt * 512) % (2**32)
-            rx_hc_octets = p.rx_good_pkt * 512
-            tx_hc_octets = p.tx_good_pkt * 512
+            # Interpolate packets smoothly between scrapes
+            rx_pkts, tx_pkts = self._update_rates_and_interpolate(
+                p_num,
+                p.rx_good_pkt,
+                p.tx_good_pkt,
+                snapshot.last_scraped,
+                link_is_up
+            )
 
-            # ifTable (1.3.6.1.2.1.2.2.1)
+            # Octets calculation: standard estimate 512 bytes per packet
+            rx_hc_octets = rx_pkts * 512
+            tx_hc_octets = tx_pkts * 512
+            rx_octets = rx_hc_octets % (2**32)
+            tx_octets = tx_hc_octets % (2**32)
+
+            # ifTable (1.3.6.1.2.1.2.2.1) - RFC 1213 / RFC 2863
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.1.{p_num}")] = rfc1902.Integer32(p_num)
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.2.{p_num}")] = rfc1902.OctetString(f"Port {p_num}")
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.3.{p_num}")] = rfc1902.Integer32(6)  # ethernetCsmacd
@@ -86,20 +188,24 @@ class SwitchMibBuilder:
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.5.{p_num}")] = rfc1902.Gauge32(speed_bps)
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.7.{p_num}")] = rfc1902.Integer32(admin_status)
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.8.{p_num}")] = rfc1902.Integer32(oper_status)
+            oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.9.{p_num}")] = rfc1902.TimeTicks(0)  # ifLastChange
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.10.{p_num}")] = rfc1902.Counter32(rx_octets)
-            oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.11.{p_num}")] = rfc1902.Counter32(p.rx_good_pkt % (2**32))
+            oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.11.{p_num}")] = rfc1902.Counter32(rx_pkts % (2**32))
+            oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.13.{p_num}")] = rfc1902.Counter32(0)  # ifInDiscards
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.14.{p_num}")] = rfc1902.Counter32(p.rx_bad_pkt % (2**32))
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.16.{p_num}")] = rfc1902.Counter32(tx_octets)
-            oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.17.{p_num}")] = rfc1902.Counter32(p.tx_good_pkt % (2**32))
+            oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.17.{p_num}")] = rfc1902.Counter32(tx_pkts % (2**32))
+            oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.19.{p_num}")] = rfc1902.Counter32(0)  # ifOutDiscards
             oids[str_to_oid(f"1.3.6.1.2.1.2.2.1.20.{p_num}")] = rfc1902.Counter32(p.tx_bad_pkt % (2**32))
 
-            # ifXTable (1.3.6.1.2.1.31.1.1.1) - 64-bit high-capacity counters
+            # ifXTable (1.3.6.1.2.1.31.1.1.1) - RFC 2863 64-bit high-capacity counters
             oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.1.{p_num}")] = rfc1902.OctetString(f"Port {p_num}")
             oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.6.{p_num}")] = rfc1902.Counter64(rx_hc_octets)
-            oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.7.{p_num}")] = rfc1902.Counter64(p.rx_good_pkt)
+            oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.7.{p_num}")] = rfc1902.Counter64(rx_pkts)
             oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.10.{p_num}")] = rfc1902.Counter64(tx_hc_octets)
-            oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.11.{p_num}")] = rfc1902.Counter64(p.tx_good_pkt)
+            oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.11.{p_num}")] = rfc1902.Counter64(tx_pkts)
             oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.15.{p_num}")] = rfc1902.Gauge32(speed_mbps)
+            oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.17.{p_num}")] = rfc1902.Integer32(1)  # connectorPresent: true
             oids[str_to_oid(f"1.3.6.1.2.1.31.1.1.1.18.{p_num}")] = rfc1902.OctetString(f"Port {p_num}")
 
         # ------------------------------------------------------------------
@@ -147,13 +253,17 @@ class SwitchMibBuilder:
 
         # 4.2 Port Statistics Table (1.3.6.1.4.1.11863.6.2.1)
         for p_num, p in sorted(ports.items()):
+            tracker = self.port_trackers.get(p_num)
+            served_tx = tracker.last_served_tx if tracker else p.tx_good_pkt
+            served_rx = tracker.last_served_rx if tracker else p.rx_good_pkt
+
             oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.1.{p_num}")] = rfc1902.Integer32(p_num)
             oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.2.{p_num}")] = rfc1902.OctetString(f"Port {p_num}")
             oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.3.{p_num}")] = rfc1902.OctetString(p.status)
             oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.4.{p_num}")] = rfc1902.OctetString(p.link_status)
-            oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.5.{p_num}")] = rfc1902.Counter64(p.tx_good_pkt)
+            oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.5.{p_num}")] = rfc1902.Counter64(served_tx)
             oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.6.{p_num}")] = rfc1902.Counter64(p.tx_bad_pkt)
-            oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.7.{p_num}")] = rfc1902.Counter64(p.rx_good_pkt)
+            oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.7.{p_num}")] = rfc1902.Counter64(served_rx)
             oids[str_to_oid(f"1.3.6.1.4.1.11863.6.2.1.8.{p_num}")] = rfc1902.Counter64(p.rx_bad_pkt)
 
         # 4.3 PoE Config Table (1.3.6.1.4.1.11863.6.3.1)

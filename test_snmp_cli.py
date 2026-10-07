@@ -121,7 +121,7 @@ async def query_snmp(args):
 def main():
     parser = argparse.ArgumentParser(description="Test SNMP queries against the TP-Link gateway")
     parser.add_argument("--host", default="127.0.0.1", help="SNMP Agent host (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=161, help="SNMP UDP port (default: 161)")
+    parser.add_argument("--port", type=int, default=6161, help="SNMP UDP port (default: 6161)")
     parser.add_argument("--version", choices=["v2c", "v3"], default="v2c", help="SNMP Version (default: v2c)")
     args = parser.parse_args()
 

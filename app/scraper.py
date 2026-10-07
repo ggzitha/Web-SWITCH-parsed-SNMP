@@ -442,8 +442,8 @@ class TpLinkSwitchScraper:
                 pass
             finally:
                 self._authenticated = False
-                await self._session.close()
-                self._session = None
+                if self._session and not self._session.closed and self._session.cookie_jar:
+                    self._session.cookie_jar.clear()
 
     async def scrape(self) -> SwitchSnapshot:
         """Execute full scrape cycle: fetch Port Statistics and PoE Config."""
