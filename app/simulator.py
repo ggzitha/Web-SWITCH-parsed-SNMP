@@ -122,7 +122,8 @@ class MockSwitchState:
             port_stats=dict(self.port_stats),
             poe_stats=dict(self.poe_stats),
             global_poe=self.global_poe,
-            model=self.target.model
+            model=self.target.model,
+            latency_ms=round(random.uniform(0.9, 2.4), 2)
         )
 
 

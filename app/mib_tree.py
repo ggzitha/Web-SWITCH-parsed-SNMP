@@ -250,6 +250,9 @@ class SwitchMibBuilder:
         oids[str_to_oid("1.3.6.1.4.1.11863.6.1.5.0")] = rfc1902.Gauge32(int(g_poe.power_limit * 10))
         oids[str_to_oid("1.3.6.1.4.1.11863.6.1.6.0")] = rfc1902.Gauge32(int(g_poe.power_consumption * 10))
         oids[str_to_oid("1.3.6.1.4.1.11863.6.1.7.0")] = rfc1902.Gauge32(int(g_poe.power_remain * 10))
+        oids[str_to_oid("1.3.6.1.4.1.11863.6.1.8.0")] = rfc1902.Gauge32(int(snapshot.latency_ms * 10))  # Latency in 0.1ms
+        oids[str_to_oid("1.3.6.1.4.1.11863.6.1.9.0")] = rfc1902.OctetString(f"{snapshot.latency_ms:.2f} ms")
+        oids[str_to_oid("1.3.6.1.4.1.11863.6.1.10.0")] = rfc1902.Integer32(1 if snapshot.status == "ONLINE" else 2)
 
         # 4.2 Port Statistics Table (1.3.6.1.4.1.11863.6.2.1)
         for p_num, p in sorted(ports.items()):

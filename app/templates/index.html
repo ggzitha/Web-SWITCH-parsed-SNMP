@@ -363,6 +363,10 @@
         <span class="banner-val" id="sw-status"><span class="badge badge-success">ONLINE</span></span>
       </div>
       <div class="banner-item">
+        <span class="banner-label">Network Latency</span>
+        <span class="banner-val" id="sw-latency" style="color: var(--accent); font-family: 'JetBrains Mono', monospace;">-- ms</span>
+      </div>
+      <div class="banner-item">
         <span class="banner-label">Last Refreshed</span>
         <span class="banner-val" id="sw-last-scrape" style="font-size: 0.9rem;">-</span>
       </div>
@@ -576,6 +580,9 @@
 
       const d = sw.last_scraped > 0 ? new Date(sw.last_scraped * 1000).toLocaleTimeString() : 'Never';
       document.getElementById('sw-last-scrape').textContent = d;
+
+      const lat = (sw.latency_ms !== undefined && sw.latency_ms > 0) ? `${sw.latency_ms.toFixed(2)} ms` : '-- ms';
+      document.getElementById('sw-latency').textContent = lat;
 
       // Update commands
       document.getElementById('cmd-v2c').textContent = `snmpwalk -v2c -c {{ config.snmp.community }} 127.0.0.1:${sw.snmp_port} 1.3.6.1.2.1.1`;

@@ -72,11 +72,25 @@ async def scrape_loop(target: SwitchTarget, interval: int, mock_mode: bool):
                     model=target.model
                 )
 
-        # Wait for the next refresh interval or until shutdown
-        try:
-            await asyncio.wait_for(shutdown_event.wait(), timeout=interval)
-        except asyncio.TimeoutError:
-            pass
+        # Wait for the next refresh interval, running lightweight latency probes every 10s
+        probe_interval = 10
+        elapsed_wait = 0
+        while elapsed_wait < interval and not shutdown_event.is_set():
+            wait_time = min(probe_interval, interval - elapsed_wait)
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=wait_time)
+                break
+            except asyncio.TimeoutError:
+                elapsed_wait += wait_time
+                if elapsed_wait < interval and not mock_mode and scraper:
+                    lat = await scraper.probe_latency()
+                    if lat is None:
+                        # Switch was unplugged or powered off!
+                        if snapshots[target.id].status != "OFFLINE":
+                            logger.warning("[%s] Switch unreachable (probe failed). Marking OFFLINE immediately.", target.name)
+                        snapshots[target.id].status = "OFFLINE"
+                        snapshots[target.id].latency_ms = 0.0
+                        snapshots[target.id].error_message = "Host unreachable (unplugged or powered off)"
 
 
 async def maintenance_loop():

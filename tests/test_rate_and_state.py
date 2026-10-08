@@ -92,6 +92,11 @@ def test_rfc2863_ifmib_compliance():
     assert str_to_oid("1.3.6.1.2.1.31.1.1.1.15.1") in oid_map  # ifHighSpeed.1
     assert str_to_oid("1.3.6.1.2.1.31.1.1.1.17.1") in oid_map  # ifConnectorPresent.1
 
+    # Latency and Status OIDs
+    assert str_to_oid("1.3.6.1.4.1.11863.6.1.8.0") in oid_map   # latency gauge
+    assert str_to_oid("1.3.6.1.4.1.11863.6.1.9.0") in oid_map   # latency string
+    assert str_to_oid("1.3.6.1.4.1.11863.6.1.10.0") in oid_map  # status int
+
 
 def test_state_manager_persistence(tmp_path):
     """Verify that StateManager persists boot times and detects physical reboots."""
@@ -115,3 +120,29 @@ def test_state_manager_persistence(tmp_path):
     assert reboot
     # Boot time should now be updated to a newer timestamp
     assert mgr2.get_boot_time(1) > b1
+
+
+@pytest.mark.asyncio
+async def test_probe_latency_mock():
+    """Verify probe_latency measures real connection response times."""
+    import asyncio
+    from app.config import SwitchTarget
+    from app.scraper import TpLinkSwitchScraper
+
+    # Start a mock TCP server on random port
+    server = await asyncio.start_server(lambda r, w: None, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+
+    target = SwitchTarget(id=99, ip=f"127.0.0.1:{port}", user="admin", password="password", snmp_port=16199)
+    scraper = TpLinkSwitchScraper(target)
+
+    async with server:
+        lat = await scraper.probe_latency()
+        assert lat is not None
+        assert lat > 0.0
+        assert scraper.snapshot.latency_ms > 0.0
+
+    # Server closed: probe should fail and return None
+    lat_fail = await scraper.probe_latency()
+    assert lat_fail is None
+    assert scraper.snapshot.latency_ms == 0.0

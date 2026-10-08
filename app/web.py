@@ -115,6 +115,7 @@ def create_web_app(
                 "base_url": target.base_url,
                 "snmp_port": target.snmp_port,
                 "status": snap.status,
+                "latency_ms": getattr(snap, "latency_ms", 0.0),
                 "error_message": snap.error_message,
                 "last_scraped": snap.last_scraped,
                 "global_poe": {

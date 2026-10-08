@@ -103,6 +103,7 @@ class SwitchSnapshot:
     poe_stats: Dict[int, PoeConfigItem] = field(default_factory=dict)
     global_poe: GlobalPoeState = field(default_factory=GlobalPoeState)
     model: str = "TL-SG1016PE"
+    latency_ms: float = 0.0
 
 
 class TpLinkSwitchScraper:
@@ -445,11 +446,49 @@ class TpLinkSwitchScraper:
                 if self._session and not self._session.closed and self._session.cookie_jar:
                     self._session.cookie_jar.clear()
 
+    async def probe_latency(self) -> Optional[float]:
+        """Lightweight TCP ping to switch port 80 to measure real network latency in milliseconds."""
+        port = getattr(self.target, "http_port", 80)
+        if ":" in self.target.ip:
+            try:
+                port = int(self.target.ip.split(":")[-1].rstrip("/"))
+            except ValueError:
+                pass
+        t0 = time.perf_counter()
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.target.clean_ip, port),
+                timeout=2.0
+            )
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            self.snapshot.latency_ms = round(latency_ms, 2)
+            return self.snapshot.latency_ms
+        except Exception:
+            self.snapshot.latency_ms = 0.0
+            return None
+
     async def scrape(self) -> SwitchSnapshot:
         """Execute full scrape cycle: fetch Port Statistics and PoE Config."""
         async with self._lock:
             t0 = time.time()
             logger.info("[%s] Scraping switch at %s...", self.target.name, self.target.base_url)
+
+            # Fast pre-check: test TCP reachability and record latency
+            lat = await self.probe_latency()
+            if lat is None:
+                await self.logout()
+                self.snapshot.status = "OFFLINE"
+                self.snapshot.latency_ms = 0.0
+                self.snapshot.port_stats = {}
+                self.snapshot.poe_stats = {}
+                self.snapshot.global_poe = GlobalPoeState(0.0, 0.0, 0.0)
+                self.snapshot.error_message = "Host unreachable (network timeout / powered off)"
+                return self.snapshot
 
             # 1. Fetch Port Statistics
             port_html = await self._fetch_page("PortStatisticsRpm.htm")

@@ -48,6 +48,8 @@ async def query_snmp(args):
         ("sysDescr", "1.3.6.1.2.1.1.1.0"),
         ("sysUpTime", "1.3.6.1.2.1.1.3.0"),
         ("sysName (Real Switch IP)", "1.3.6.1.2.1.1.5.0"),
+        ("Switch Status", "1.3.6.1.4.1.11863.6.1.3.0"),
+        ("Switch Latency", "1.3.6.1.4.1.11863.6.1.9.0"),
     ]
     for label, oid in system_oids:
         g = await hlapi.get_cmd(
